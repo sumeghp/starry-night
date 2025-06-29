@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stellar Voronoi - Celestial Cartography</title>
+    <style>
+        body {
+            background-color: #00000a;
+            color: #e0e0e0;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            margin: 0;
+            height: 100vh;
+            overflow: hidden;
+        }
+        h1 {
+            font-weight: 300;
+            letter-spacing: 2px;
+            color: #6a85a3;
+            margin-top: 20px;
+        }
+        #controls {
+            margin: 20px 0;
+        }
+        input[type="text"] {
+            padding: 8px;
+            font-size: 14px;
+            border: 1px solid #4caeff;
+            border-radius: 4px;
+            background-color: #000510;
+            color: #e0e0e0;
+        }
+        button {
+            padding: 8px 12px;
+            font-size: 14px;
+            border: none;
+            border-radius: 4px;
+            background-color: #4caeff;
+            color: #00000a;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #87ceeb;
+        }
+        #chart-container {
+            position: relative;
+            background-color: #00000a;
+            border-radius: 50%;
+            box-shadow: 0 0 20px rgba(76, 174, 255, 0.2), inset 0 0 15px rgba(0, 0, 0, 0.5);
+        }
+        svg {
+            display: block;
+        }
+        .voronoi-cell {
+            stroke: #2a3a4a;
+            stroke-width: 0.5px;
+            fill-opacity: 0.4;
+        }
+        .graticule {
+            fill: none;
+            stroke: #2a3a4a;
+            stroke-width: 0.5px;
+        }
+        .sphere {
+            fill: #000510;
+        }
+        .star {
+            fill: white;
+            stroke: none;
+            pointer-events: none;
+        }
+        .highlight {
+            fill: #ff4500 !important;
+            stroke: #ff4500 !important;
+            stroke-width: 1.5px;
+        }
+        #tooltip {
+            position: absolute;
+            background-color: rgba(0, 0, 10, 0.85);
+            border: 1px solid #4caeff;
+            border-radius: 4px;
+            padding: 8px;
+            font-size: 12px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+            box-shadow: 0 0 10px rgba(76, 174, 255, 0.5);
+        }
+        #tooltip strong {
+            color: #87ceeb;
+        }
+    </style>
+</head>
+<body>
+    <h1>Stellar Voronoi</h1>
+    <div id="controls">
+        <input type="text" id="search" placeholder="Search by HR number (e.g., 7001)">
+        <button id="search-btn">Search</button>
+    </div>
+    <div id="chart-container"></div>
+    <div id="tooltip"></div>
+
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://d3js.org/d3-geo-projection.v4.min.js"></script>
+    <script>
+        function parseRA(raString) {
+            if (!raString) return null;
+            const parts = raString.match(/(\d+)h\s(\d+)m\s([\d.]+)s/);
+            if (!parts) return null;
+            const hours = parseFloat(parts[1]);
+            const minutes = parseFloat(parts[2]);
+            const seconds = parseFloat(parts[3]);
+            const decimalHours = hours + (minutes / 60) + (seconds / 3600);
+            return decimalHours * 15; // Convert hours to degrees
+        }
+
+        function parseDec(decString) {
+            if (!decString) return null;
+            const parts = decString.match(/([\+\-])(\d+)°\s(\d+)′\s(\d+)″/);
+            if (!parts) return null;
+            const sign = parts[1] === '-' ? -1 : 1;
+            const degrees = parseFloat(parts[2]);
+            const arcminutes = parseFloat(parts[3]);
+            const arcseconds = parseFloat(parts[4]);
+            return sign * (degrees + (arcminutes / 60) + (arcseconds / 3600));
+        }
+
+        const width = 960;
+        const height = 500;
+
+        const svg = d3.select("#chart-container").append("svg")
+            .attr("width", width)
+            .attr("height", height)
+            .attr("viewBox", `0 0 ${width} ${height}`);
+
+        const tooltip = d3.select("#tooltip");
+
+        const projection = d3.geoAitoff()
+            .scale(180)
+            .translate([width / 2, height / 2])
+            .precision(0.1);
+
+        const geoGenerator = d3.geoPath().projection(projection);
+
+        const spectralColor = d3.scaleOrdinal()
+            .domain(['O', 'B', 'A', 'F', 'G', 'K', 'M'])
+            .range(['#9bb0ff', '#aabfff', '#cad8ff', '#fbf8ff', '#fff4e8', '#ffddb4', '#ffbd6f']);
+
+        const dataUrl = "https://raw.githubusercontent.com/brettonw/YaleBrightStarCatalog/refs/heads/master/bsc5-all.json";
+
+        const zoom = d3.zoom()
+            .scaleExtent([1, 10]) // Allow zoom levels between 1x and 10x
+            .on("zoom", (event) => {
+                svg.select("g").attr("transform", event.transform);
+            });
+
+        svg.call(zoom);
+
+        d3.json(dataUrl).then(function(starData) {
+
+            const points = starData.map(d => {
+                const ra = parseRA(d.RA);
+                const dec = parseDec(d.Dec);
+                if (ra === null || dec === null) return null;
+                return {
+                    hr: d.HR,
+                    name: d.Name || "Unknown Star", // Add the star name here
+                    coords: [ra, dec],
+                    projected: projection([ra, dec]),
+                    vmag: parseFloat(d.Vmag),
+                    spectral: d.SpType || " "
+                };
+            }).filter(d => d && d.projected && d.vmag < 6.5);
+
+            const projectedCoords = points.map(d => d.projected);
+            const delaunay = d3.Delaunay.from(projectedCoords);
+            const voronoi = delaunay.voronoi([0, 0, width, height]);
+
+            const g = svg.append("g");
+
+            g.append("path").datum({type: "Sphere"}).attr("class", "sphere").attr("d", geoGenerator);
+            g.append("path").datum(d3.geoGraticule()).attr("class", "graticule").attr("d", geoGenerator);
+
+            g.append("g").selectAll("path").data(points).join("path")
+                .attr("class", "voronoi-cell")
+                .attr("d", (d, i) => voronoi.renderCell(i))
+                .style("fill", d => spectralColor(d.spectral[0]))
+                .on("mouseover", function(event, d) {
+                    d3.select(this).style("fill-opacity", 0.8).style("stroke", "#87ceeb");
+                    tooltip.style("opacity", 1)
+                        .html(`<strong>${d.name} (HR ${d.hr})</strong><br>Spectral Type: ${d.spectral}<br>Magnitude: ${d.vmag.toFixed(2)}`)
+                        .style("left", (event.pageX + 10) + "px")
+                        .style("top", (event.pageY - 28) + "px");
+                })
+                .on("mouseout", function(event, d) {
+                    d3.select(this).style("fill-opacity", 0.4).style("stroke", "#2a3a4a");
+                    tooltip.style("opacity", 0);
+                });
+
+            g.append("g").selectAll("circle").data(points).join("circle")
+                .attr("class", "star")
+                .attr("cx", d => d.projected[0])
+                .attr("cy", d => d.projected[1])
+                .attr("r", d => Math.max(0.5, 2.5 - (d.vmag / 2.5)));
+
+            // Function to handle the search logic
+            function searchStar() {
+                const searchValue = document.getElementById("search").value.trim();
+                if (!searchValue) return;
+
+                const foundStar = points.find(d => d.hr === searchValue);
+
+                if (foundStar) {
+                    svg.selectAll(".highlight").classed("highlight", false); // Clear previous highlights
+                    g.append("circle")
+                        .attr("cx", foundStar.projected[0])
+                        .attr("cy", foundStar.projected[1])
+                        .attr("r", 5)
+                        .attr("class", "highlight");
+
+                    tooltip.style("opacity", 1)
+                        .html(`<strong>${foundStar.name} (HR ${foundStar.hr})</strong><br>Spectral Type: ${foundStar.spectral}<br>Magnitude: ${foundStar.vmag.toFixed(2)}`)
+                        .style("left", `${foundStar.projected[0] + 10}px`)
+                        .style("top", `${foundStar.projected[1] - 28}px`);
+                } else {
+                    alert("Star not found!"); // Show an alert if the star is not found
+                }
+            }
+
+            // Add search functionality for the Enter key
+            document.getElementById("search").addEventListener("keypress", function(event) {
+                if (event.key === "Enter") {
+                    searchStar();
+                }
+            });
+
+            // Add search functionality for the Search button
+            document.getElementById("search-btn").addEventListener("click", searchStar);
+        }).catch(function(error) {
+            console.error("Error loading the star data:", error);
+            document.body.innerHTML = `<h1>Error loading data from ${dataUrl}</h1><p>This might be a CORS issue. Check the browser console for details.</p>`;
+        });
+    </script>
+</body>
+</html>
