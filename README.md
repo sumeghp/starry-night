@@ -1,8 +1,9 @@
 # Stellar Voronoi - Celestial Cartography
 
 **Stellar Voronoi** is an interactive star map that visualizes the night sky using data from the **Yale Bright Star Catalog**. This project lets you explore stars and their relationships through a **Voronoi diagram**, offering a unique and engaging way to view celestial objects.
-https://sumeghp.github.io/starry-night/
+
 ---
+[live](https://sumeghp.github.io/starry-night/)
 
 ## Features
 
